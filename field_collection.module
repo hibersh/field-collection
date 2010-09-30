@@ -61,16 +61,24 @@ function field_collection_item_delete_multiple($item_ids) {
 /**
  * Generates field collection item edit form array.
  *
- * This form wasn't meant to be used with drupal_get_form(), therefore it lacks
+ * This form didn't intended to be used with drupal_get_form(), therefore it lacks
  * any submit button.
  */
 function field_collection_item_form($form, &$form_state, $collection_item) {
+  //Determine namespace for fields
+  $namespace = 'default';
+  if (isset($form['#collection_field_name'])) {
+    $namespace = $form['#collection_field_name'] . '_' . $form['#collection_delta'];
+  }
 
-  if (!isset($form_state['collection_item'])) {
-    $form_state['collection_item'] = $collection_item;
+  // Store item object in $form_state
+  if (!isset($form_state['collection_item'][$namespace])) {
+    $form_state['collection_item'][$namespace]['collection_item'] = $collection_item;
+    $form_state['collection_item'][$namespace]['collection_field_name'] = $form['#collection_field_name'];
+    $form_state['collection_item'][$namespace]['collection_delta'] = $form['#collection_delta'];
   }
   else {
-    $collection_item = $form_state['collection_item'];
+    $collection_item = $form_state['collection_item'][$namespace]['collection_item'];
   }
 
   $form['item_id'] = array(
@@ -83,7 +91,8 @@ function field_collection_item_form($form, &$form_state, $collection_item) {
     '#value' => isset($collection_item->collection_name) ? $collection_item->collection_name : NULL,
   );
 
-  field_attach_form('field_collection_item', $collection_item, $form, $form_state, $collection_item->language);
+  // Attach fields
+  field_attach_form('field_collection_item', $collection_item, $form, $form_state, $collection_item->language, $namespace);
 
   return $form;
 }
@@ -98,6 +107,7 @@ function field_collection_item_is_empty($collection_item) {
     $field_values = $collection_item[$field_name];
 
     foreach ($field_values as $langcode => $items) {
+      unset($items['add_more']);
       $items = _field_filter_items($field, $items);
       // We assume that if at least one of the fields is not empty then
       // field collection item not empty too.

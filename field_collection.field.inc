@@ -1,135 +1,24 @@
 <?php
 // $Id$
 
-function _field_collection_field_form_reset_validated(&$elements, $validated = FALSE) {
-  $elements['#validated'] = $validated;
-  foreach (element_children($elements) as $key) {
-    _field_collection_field_form_reset_validated($elements[$key], $validated);
-  }
-}
-
-function _field_collection_field_form_element_replace_after_build(&$elements, $language) {
-  foreach (element_children($elements) as $key) {
-    $field = isset($elements[$key][$language]['#field_name']) ? $elements[$key][$language] : NULL;
-    $callbacks = isset($field['#after_build']) ? $field['#after_build'] : array();
-
-    foreach ($callbacks as $delta => $function) {
-      if ($function == 'field_form_element_after_build') {
-        $callbacks[$delta] = 'field_collection_field_form_element_after_build';
-        $elements[$key][$language]['#after_build'] = $callbacks;
-
-        break;
-      }
-    }
-  }
-}
-
-function field_collection_field_add_more_submit($form, &$form_state) {
-  $cfn = $form_state['clicked_button']['#collection_field_name'];
-  $delta = $form_state['clicked_button']['#collection_delta'];
-  $field_name = $form_state['clicked_button']['#field_name'];
-  $lang = $form_state['clicked_button']['#language'];
-
-  if ($form_state['values'][$cfn . '_' . $delta . '_' . $field_name . '_add_more']) {
-    // @todo Wow... is there any way to deal with this crazy nesting?!
-    $form_state['field_collection'][$cfn][$lang][$delta]['field_item_count'][$field_name] = count($form_state['values'][$cfn][$lang][$delta][$field_name][$lang]);
-  }
-  $form_state['rebuild'] = TRUE;
-}
-
-function field_collection_field_add_more_js($form, $form_state) {
-  // Retrieve field information.
-  $cfn = $form_state['clicked_button']['#collection_field_name'];
-  $delta = $form_state['clicked_button']['#collection_delta'];
-  $field_name = $form_state['clicked_button']['#field_name'];
-  $langcode = $form_state['clicked_button']['#language'];
-  $field_info = $form_state['field_collection'][$cfn][$langcode][$delta]['field'][$field_name][$langcode];
-  $field = $field_info['field'];
-
-  if ($field['cardinality'] != FIELD_CARDINALITY_UNLIMITED) {
-    return;
-  }
-
-  // Navigate to the right element in the the form.
-  $element = $form;
-
-  foreach ($field_info['array_parents'] as $key) {
-    $element = $element[$key];
-  }
-
-  // Add a DIV around the new field to receive the AJAX effect.
-  $delta = $element['#max_delta'];
-  $element[$delta]['#prefix'] = '<div class="ajax-new-content">' . (isset($element[$delta]['#prefix']) ? $element[$delta]['#prefix'] : '');
-  $element[$delta]['#suffix'] = (isset($element[$delta]['#suffix']) ? $element[$delta]['#suffix'] : '') . '</div>';
-
-  return $element;
-}
 
 /**
  * Implements hook_field_attach_form().
  */
 function field_collection_field_attach_form($entity_type, $entity, &$form, &$form_state, $langcode) {
 //  dpm($form);
-  if ($entity_type == 'field_collection_item') {
-    $collection_field_name = $form['#collection_field_name'];
-    $collection_delta = $form['#collection_delta'];
-    $collection_name = $form['#collection_name'];
+  if (isset($form_state['collection_item']) && $entity_type != 'field_collection_item') {
+    $collection_namespace = isset($form['#namespace']) ? $form['#namespace'] : 'default';
 
-    // First of all we must replace default 'after_build' callback, which
-    // sets 'array_parents' attribute in $form_state['field']
-    _field_collection_field_form_element_replace_after_build($form, $langcode);
+    foreach ($form_state['collection_item'] as $namespace => $item_info) {
+      $collection_field_name = $item_info['collection_field_name'];
 
-    // Second, we must check for existence of fields with 'cardinality' set to
-    // FIELD_CARDINALITY_UNLIMITED and workaround the 'add_more' buttons.
-    // Also we need to save information about collection in nested fields.
-    foreach (element_children($form) as $key) {
-      $element = isset($form[$key][$langcode]['#field_name']) ? $form[$key][$langcode] : FALSE;
-
-      if ($element) {
-        // Just add information about field collection
-        $element['#collection_field_name'] = $collection_field_name;
-        $element['#collection_delta'] = $collection_delta;
-      }
-
-      if ($element && isset($element['add_more'])) {
-        $field_name = $element['add_more']['#field_name'];
-
-        // We must prevent collisions in names of submit buttons
-        $element['add_more']['#name'] = $collection_field_name . '_' . $collection_delta . '_'. $element['add_more']['#name'];
-
-        // Set correct parents for 'limit validation errors'
-        $element['add_more']['#limit_validation_errors'] = array(
-          array($collection_field_name, $langcode, $collection_delta, $field_name, $langcode),
-        );
-
-        // Substitute submit handlers
-        $element['add_more']['#submit'] = array('field_collection_field_add_more_submit');
-        $element['add_more']['#ajax']['callback'] = 'field_collection_field_add_more_js';
-
-        // Substitute wrapper element ID
-        $wrapper_id = drupal_html_id($collection_field_name . '-'. $collection_delta . '-' . $field_name . '-add-more-wrapper');
-        $element['#prefix'] = '<div id="' . $wrapper_id . '">';
-
-        // Above submit handlers will find apropriate field using this values
-        // in addition to default #field_name and #language, which are already
-        // set.
-        $element['add_more']['#collection_field_name'] = $collection_field_name;
-        $element['add_more']['#collection_delta'] = $collection_delta;
-      }
-
-      // Return modified element to the form
-      $form[$key][$langcode] = $element;
-    }
-  }
-  elseif (isset($form_state['field_collection'])) {
-    foreach (array_keys($form_state['field_collection']) as $field_name) {
-      $language = $form[$field_name]['#language'];
-      $field = $form_state['field'][$field_name][$langcode]['field'];
-      $instance = $form_state['field'][$field_name][$langcode]['instance'];
+      $field = $form_state['field'][$collection_namespace][$collection_field_name][$langcode]['field'];
+      $instance = $form_state['field'][$collection_namespace][$collection_field_name][$langcode]['instance'];
       $widget_type = $instance['widget']['type'];
 
-      $form[$field_name][$langcode]['#collection_name'] = $field['settings']['collection_name'];
-      $form[$field_name][$langcode]['#theme'] = $widget_type . '_form';
+      $form[$collection_field_name][$langcode]['#collection_name'] = $field['settings']['collection_name'];
+      $form[$collection_field_name][$langcode]['#theme'] = $widget_type . '_form';
     }
   }
 }
@@ -139,47 +28,45 @@ function field_collection_field_attach_form($entity_type, $entity, &$form, &$for
  */
 function field_collection_field_attach_submit($entity_type, $entity, $form, &$form_state) {
   // Check if we have any 'field collection' fields in this entity
-  if (isset($form_state['field_collection']) && $entity_type != 'field_collection_item') {
-    dpm($entity);
-    dpm($form_state);
-    // Loop through 'field collection' fields
-    foreach ($form_state['field_collection'] as $collection_field_name => $field) {
+  if (isset($form_state['collection_item']) && $entity_type != 'field_collection_item') {
+    // Get fields namespace of the parent entity
+    $saved_namespace = isset($form['#namespace']) ? $form['#namespace'] : 'default';
+//dpm($entity);
+    $items = array();
+    // Loop through 'field collection items'
+    foreach ($form_state['collection_item'] as $namespace => $item_info) {
+      $collection_item = $item_info['collection_item'];
+      $collection_field_name = $item_info['collection_field_name'];
+      $delta = $item_info['collection_delta'];
+
       $language = $form[$collection_field_name]['#language'];
 
-      // Empty items were filtered during processing of the submit for
-      // 'field collection' field. But here we must invoke _attach_submit()
-      // on collection items to handle sorting of their field items.
-      // $entity already contains onle non-empty items.
+      $form['#namespace'] = $namespace;
+      field_attach_submit('field_collection_item', $collection_item, $form, $form_state);
 
-      // Process each item in field
-      $items = array();
-      foreach ($field[$language] as $delta => $item) {
-        $collection_item = $item['collection_item'];
-        $pseudo_form_state = array();
-        $pseudo_form_state['values'] = $form_state['values'][$collection_field_name][$language][$delta];
-        field_attach_submit('field_collection_item', $collection_item, $form, $pseudo_form_state);
-
-        // If collection item is empty, then we must remove it from the list
-        if (isset($collection_item->delete_needed) && $collection_item->delete_needed) {
-          if (!empty($collection_item->item_id)) {
-            field_collection_item_delete($collection_item->item_id);
-          }
-          unset($form_state['field_collection'][$collection_field_name][$language][$delta]);
+      // If collection item is empty, then we must remove it from the list
+      if (isset($collection_item->is_empty) && $collection_item->is_empty) {
+        if (!empty($collection_item->item_id)) {
+          field_collection_item_delete($collection_item->item_id);
         }
-        // Or, just add it to the item list
-        else {
-          $items[$delta] = (array) $collection_item;
-        }
+        unset($form_state['collection_item'][$namespace]);
+        unset($form_state['field'][$namespace]);
       }
-
-      $entity->{$collection_field_name}[$language] = $items;
+      // Or, just add it to the item list
+      else {
+        $entity->{$collection_field_name}[$language][$delta] = (array) $collection_item;
+      }
+//      if (isset($form_state['field_item_count'][$saved_namespace][$collection_field_name])) {
+//        unset($form_state['field_item_count'][$saved_namespace][$collection_field_name]);
+//      }
     }
+//    dpm($entity);
   }
   // Check if collection item is empty, and if so, flag it for deletion
   elseif ($entity_type == 'field_collection_item') {
     $collection_item = (array) $entity;
     if (field_collection_item_is_empty($collection_item)) {
-      $entity->delete_needed = TRUE;
+      $entity->is_empty = TRUE;
     }
   }
 }
@@ -260,32 +147,6 @@ function field_collection_field_is_empty($item, $field) {
 }
 
 /**
- * Updates 'array_parents' attribute for collection fields in $form_state.
- *
- * After build callback for 'field collection' form elements.
- *
- * @see field_collection_field_attach_form().
- */
-function field_collection_field_form_element_after_build($element, &$form_state) {
-  // First parent of this element must be field name of the collection.
-  $collection = $element['#array_parents'][0];
-  // And third parent is delta in this collection.
-  $delta = $element['#array_parents'][2];
-
-  $field_name = $element['#field_name'];
-  $langcode = $element['#language'];
-
-  $form_state['field_collection'][$collection][$langcode][$delta]['field'][$field_name][$langcode]['array_parents'] = $element['#array_parents'];
-
-  // We must temporarily disable validation of fields to prevent errors
-  // in default validators. Validation will be invoked later in
-  // field_collection_field_widget_validate().
-  _field_collection_field_form_reset_validated($element, TRUE);
-  return $element;
-}
-
-
-/**
  * Validates collections fields.
  *
  * @param mixed $form
@@ -294,35 +155,19 @@ function field_collection_field_form_element_after_build($element, &$form_state)
  * @see field_collection_field_widget_form().
  */
 function field_collection_field_form_validate($form, &$form_state) {
-  // We need to extract all field collection entities, their forms and values
-  // to pass them in entity validation function
-
-  $collections = isset($form_state['field_collection']) ? $form_state['field_collection'] : array();
-
-  foreach ($collections as $collection_name => $collection) {
-    $language = $form[$collection_name]['#language'];
-    foreach ($collection[$language] as $delta => $info) {
-      $collection_item = $info['collection_item'];
-
-      // Prepare $form_state for this entity
-      $pseudo_form_state = array();
-      $pseudo_form_state['field'] = $info['field'];
-      if (isset($info['field_item_count'])) {
-        $pseudo_form_state['field_item_count'] = $info['field_item_count'];
-      }
-      $values = $form_state['values'][$collection_name][$language][$delta];
-
-      $pseudo_form_state['values'] = $values;
-
-      // Check for 'Add more' button
-//      if (isset($form_state['values'][$field_name .'_add_more'])) {
-//        $pseudo_form_state['values'][$field_name .'_add_more'] = $form_state['values'][$field_name .'_add_more'];
-//      }
-      $pseudo_form_state['complete form'] = $form_state['complete form'];
-      // Ok, let's do it.
-      // Note that we can (and must) use real $form here (hopefully)
-      entity_form_field_validate('field_collection', $form, $pseudo_form_state);
-    }
+  // Just set appropriate namespace in $form to validate fields of every
+  // collection item in the form.
+  $items = isset($form_state['collection_item']) ? $form_state['collection_item'] : array();
+  foreach ($items as $namespace => $item_info) {
+    $form['#namespace'] = $namespace;
+    $collection_item = $item_info['collection_item'];
+    // Avoid using entity_form_field_validate() here, because it incorrectly
+    // identifies currently processing entity by copying full
+    // $form_state['values'] structure.
+    // Also, we can use previously saved field collection item entity, because
+    // field_attach_form_validate() performs copying of values from $form_state
+    // into provided object.
+    field_attach_form_validate('field_collection_item', $collection_item, $form, $form_state);
   }
 }
 
@@ -333,9 +178,9 @@ function field_collection_field_load($entity_type, $entities, $field, $instances
   // Perform check on $entity_type to prevent infinite recursion
   if ($entity_type != 'field_collection_item' && $field['type'] == 'field_collection') {
     $collection_name = $field['settings']['collection_name'];
+    // @todo Use field_collection_item_load_multiple() instead of this.
     foreach ($entities as $id => $entity) {
       foreach ($items[$id] as $delta => $item) {
-        // @todo Use field_collection_item_load_multiple() instead of this.
         if (isset($item['item_id']) && $item['item_id'] > 0) {
           $collection_item = field_collection_item_load($item['item_id']);
           $collection_item = (array) $collection_item;
@@ -391,59 +236,48 @@ function field_collection_field_update($entity_type, $entity, $field, $instance,
  * Implements hook_field_widget_form().
  */
 function field_collection_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+//  dpm($items);
+//  dpm($form_state['values']);
   $widget_type = $instance['widget']['type'];
   $field_name = $field['field_name'];
   $collection_name = $field['settings']['collection_name'];
 
-  // We define container entity which will hold sub-fields
-  $item_id = isset($items[$delta]['item_id']) ? $items[$delta]['item_id'] : 0;
-  $collection_item = ($item_id > 0) ? field_collection_item_load($item_id) : field_collection_item_set_defaults(array('collection_name' => $collection_name));
+  // The 'item_id' property might not be initialized for new items, so we check
+  // here by 'collection_name'.
+  if (isset($items[$delta]['collection_name'])) {
+    $collection_item = (object) $items[$delta];
+  }
+  // Initialize defaulted collection item
+  else {
+    $collection_item = field_collection_item_set_defaults(array('collection_name' => $collection_name));
+  }
+  // @todo Language must be handled in a different way. How?
   $collection_item->language = $langcode;
 
+  // Prepare sub-form to append to the main $form
   $sub_form = array(
     '#collection_field_name' => $field_name,
     '#collection_name' => $collection_name,
     '#collection_delta' => $delta,
   );
 
-  // Prepare form_state for $sub_form
-  $sub_form_state = array();
-  if (isset($form_state['field_collection'][$field_name][$langcode][$delta]['field'])) {
-    $sub_form_state['field'] = $form_state['field_collection'][$field_name][$langcode][$delta]['field'];
-  }
-  if (isset($form_state['field_collection'][$field_name][$langcode][$delta]['field_item_count'])) {
-    $sub_form_state['field_item_count'] = $form_state['field_collection'][$field_name][$langcode][$delta]['field_item_count'];
-  }
-
   // Retrieve collection item form.
   // @todo Allow altering of this form via hook_form_alter() and friends.
   //   Maybe this is not neccesary because we have hook_field_attach_form().
-  $sub_form = field_collection_item_form($sub_form, $sub_form_state, $collection_item);
+  $sub_form = field_collection_item_form($sub_form, $form_state, $collection_item);
 
-  // Now we append sub_form to the real form and store any additional
-  // information in $form_state to use it on form processing stage.
   $element += array(
     '#type' => 'fieldset',
     '#tree' => TRUE,
     '#field_name' => $field_name,
     '#delta' => $delta,
-    '#element_validate' => array('field_collection_field_widget_validate'),
   );
   $element += $sub_form;
 
-  // Update form state
-  $form_state['field_collection'][$field_name][$langcode][$delta]['collection_item'] = $sub_form_state['collection_item'];
-  $form_state['field_collection'][$field_name][$langcode][$delta]['field'] = $sub_form_state['field'];
-  if (isset($sub_form_state['field_item_count'])) {
-    $form_state['field_collection'][$field_name][$langcode][$delta]['field_item_count'] = $sub_form_state['field_item_count'];
-  }
-
-//  $form[$field_name][$langcode]['#theme'] = $widget_type . '_form';
-
   // Add validate callback for form
-//  if (isset($form['#validate']) && ! in_array('field_collection_form_validate', $form['#validate'])) {
-//    $form['#validate'][] = 'field_collection_form_validate';
-//  }
+  if (isset($form['#validate']) && ! in_array('field_collection_field_form_validate', $form['#validate'])) {
+    $form['#validate'][] = 'field_collection_field_form_validate';
+  }
 
   return $element;
 }
@@ -453,15 +287,15 @@ function field_collection_field_widget_form(&$form, &$form_state, $field, $insta
  */
 function field_collection_field_widget_info() {
   return array(
-    'field_collection' => array(
-      'label' => t('Unformatted'),
-      'field types' => array('field_collection'),
-      'settings' => array(),
-      'behaviors' => array(
-        'multiple values' => FIELD_BEHAVIOR_DEFAULT,
-        'default value' => FIELD_BEHAVIOR_DEFAULT,
-      ),
-    ),
+//    'field_collection' => array(
+//      'label' => t('Unformatted'),
+//      'field types' => array('field_collection'),
+//      'settings' => array(),
+//      'behaviors' => array(
+//        'multiple values' => FIELD_BEHAVIOR_DEFAULT,
+//        'default value' => FIELD_BEHAVIOR_DEFAULT,
+//      ),
+//    ),
     'field_collection_table' => array(
       'label' => t('Table'),
       'field types' => array('field_collection'),
@@ -473,38 +307,6 @@ function field_collection_field_widget_info() {
     ),
   );
 }
-
-/**
- * Validates single 'field collection' field item widget.
- *
- * @see field_collection_field_widget_form().
- */
-function field_collection_field_widget_validate(&$elements, &$form_state) {
-  //dpm($form_state);
-  $field_name = $elements['#field_name'];
-  $language = $elements['#language'];
-  $delta = $elements['#delta'];
-  $collection = $form_state['field_collection'][$field_name][$language][$delta];
-
-  // Substitute $form_state['field'] with correct information from
-  // $form_state['field_collection']
-  $saved_field_info = $form_state['field'];
-  $form_state['field'] = $collection['field'];
-
-  // Reset validation of child elements
-  _field_collection_field_form_reset_validated($elements, FALSE);
-
-  // Invoke validation on this subform.
-  // Avoid calling _form_validate($element) because it will create recursion.
-  foreach (element_children($elements) as $key) {
-    if (isset($elements[$key]) && $elements[$key]) {
-      _form_validate($elements[$key], $form_state);
-    }
-  }
-  $elements['#validated'] = TRUE;
-  $form_state['field'] = $saved_field_info;
-}
-
 
 /**
  * Returns HTML for an individual form element.

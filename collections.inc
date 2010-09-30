@@ -65,31 +65,18 @@ function field_collection_form($form, &$form_state, $collection = NULL) {
     '#description' => t('The human-readable name of this field collection. It is recommended that this title begin with a capital letter and contain only letters, numbers, and spaces. This title must be unique.'),
     '#required' => TRUE,
     '#size' => 30,
-    '#field_suffix' => ' <small id="edit-title-suffix">' . t('Machine name: @name', array('@name' => $collection->name)) . '</small>',
   );
 
-  $js_settings = array(
-    'type' => 'setting',
-    'data' => array(
-      'machineReadableValue' => array(
-        'title' => array(
-          'text' => t('Machine name'),
-          'target' => 'name',
-          'searchPattern' => '[^a-z0-9]+',
-          'replaceToken' => '_',
-        ),
-      ),
-    ),
-  );
   $form['name'] = array(
-    '#title' => t('Machine name'),
-    '#type' => 'textfield',
+//    '#title' => t('Machine name'),
+    '#type' => 'machine_name',
     '#default_value' => $collection->name,
     '#maxlength' => 32,
     '#required' => TRUE,
     '#description' => t('The machine-readable name of this field collection. This name must contain only lowercase letters, numbers, and underscores. Underscores will be converted into hyphens when constructing the URL. This name must be unique.'),
-    '#attached' => array(
-      'js' => array(drupal_get_path('module', 'system') . '/system.js', $js_settings),
+    '#machine_name' => array(
+      'source' => array('title'),
+      'exists' => 'field_collection_load',
     ),
   );
 
