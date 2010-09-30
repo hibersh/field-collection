@@ -1,0 +1,101 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * Install, update and uninstall functions for the Field Collection module.
+ */
+
+/**
+ * Implements hook_field_schema().
+ */
+function field_collection_field_schema($field) {
+  $schema = array();
+
+  if ($field['type'] == 'field_collection') {
+    $schema['columns'] = array(
+      'item_id' => array(
+        'description' => 'The pointer to {field_collection_item}.item_id field.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    );
+  }
+
+  return $schema;
+}
+
+/**
+ * Implements hook_schema().
+ */
+function field_collection_schema() {
+  $schema = array();
+
+  $schema['field_collection_item'] = array(
+    'description' => 'The base table for field collection items.',
+    'fields' => array(
+      'item_id' => array(
+        'description' => 'The primary identifier for a field collection item.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'collection_name' => array(
+        'description' => 'The {field_collection}.name of collection.',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'language' => array(
+        'description' => 'The {languages}.language of this item.',
+        'type' => 'varchar',
+        'length' => 12,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'indexes' => array(
+      'field_collection_name'    => array('collection_name'),
+    ),
+    'foreign keys' => array(
+      'field_collection_name' => array(
+        'table' => 'field_collection',
+        'columns' => array('name' => 'collection_name'),
+      ),
+    ),
+    'primary key' => array('item_id'),
+  );
+
+  $schema['field_collection'] = array(
+    'description' => 'Stores information about all defined {field_collection}s.',
+    'fields' => array(
+      'name' => array(
+        'description' => 'The machine-readable name of this collection.',
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+      ),
+      'title' => array(
+        'description' => 'The human-readable name of this collection.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+        'translatable' => TRUE,
+      ),
+      'description' => array(
+        'description' => 'A brief description of this collection.',
+        'type' => 'text',
+        'not null' => TRUE,
+        'size' => 'medium',
+        'translatable' => TRUE,
+      ),
+    ),
+    'primary key' => array('name'),
+  );
+
+  return $schema;
+}

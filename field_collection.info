@@ -1,0 +1,11 @@
+; $Id$
+name = Field collection
+description = Implements field type which can contain other fields
+package = Fields
+version = VERSION
+core = 7.x
+files[] = field_collection.install
+files[] = field_collection.module
+files[] = collections.inc
+files[] = field_collection.field.inc
+configure = admin/structure/field-collections

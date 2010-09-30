@@ -1,0 +1,441 @@
+<?php
+// $Id$
+
+/**
+ * Controller class for entity fields.
+ *
+ * This extends the DrupalDefaultEntityController class, adding required
+ * special handling for comment objects.
+ */
+class FieldCollectionItemController extends DrupalDefaultEntityController {
+
+  protected function buildQuery($ids, $conditions = array(), $revision_id = FALSE) {
+    $query = parent::buildQuery($ids, $conditions, $revision_id);
+    // Specify additional fields from the user and node tables.
+//    $query->innerJoin('node', 'n', 'base.nid = n.nid');
+//    $query->addField('n', 'type', 'node_type');
+//    $query->innerJoin('users', 'u', 'base.uid = u.uid');
+//    $query->addField('u', 'name', 'registered_name');
+    return $query;
+  }
+
+}
+
+require_once DRUPAL_ROOT . '/' . drupal_get_path('module', 'field_collection') . '/field_collection.field.inc';
+
+
+/**
+ * Delete a field collection item.
+ *
+ * @param $item_id
+ *   An item ID.
+ */
+function field_collection_item_delete($item_id) {
+  field_collection_item_delete_multiple(array($item_id));
+}
+
+/**
+ * Delete multiple field collection items.
+ *
+ * @param $item_ids
+ *   An array of item IDs.
+ */
+function field_collection_item_delete_multiple($item_ids) {
+  if (!empty($item_id)) {
+    $items = field_collection_item_load_multiple($item_ids, array());
+
+    foreach ($items as $item_id => $item) {
+      field_attach_delete('field_collection_item', $item);
+    }
+
+    // Delete after calling hooks so that they can query node tables as needed.
+    db_delete('field_collection_item')
+      ->condition('item_id', $item_ids, 'IN')
+      ->execute();
+
+    cache_clear_all();
+    entity_get_controller('field_collection_item')->resetCache();
+  }
+}
+
+/**
+ * Generates field collection item edit form array.
+ *
+ * This form wasn't meant to be used with drupal_get_form(), therefore it lacks
+ * any submit button.
+ */
+function field_collection_item_form($form, &$form_state, $collection_item) {
+
+  if (!isset($form_state['collection_item'])) {
+    $form_state['collection_item'] = $collection_item;
+  }
+  else {
+    $collection_item = $form_state['collection_item'];
+  }
+
+  $form['item_id'] = array(
+    '#type' => 'value',
+    '#value' => isset($collection_item->item_id) ? $collection_item->item_id : NULL,
+  );
+
+  $form['collection_name'] = array(
+    '#type' => 'value',
+    '#value' => isset($collection_item->collection_name) ? $collection_item->collection_name : NULL,
+  );
+
+  field_attach_form('field_collection_item', $collection_item, $form, $form_state, $collection_item->language);
+
+  return $form;
+}
+
+function field_collection_item_is_empty($collection_item) {
+  $collection_item = (array) $collection_item;
+  $bundle = $collection_item['collection_name'];
+  $instances = field_info_instances('field_collection_item', $bundle);
+
+  foreach ($instances as $field_name => $instance) {
+    $field = field_info_field($field_name);
+    $field_values = $collection_item[$field_name];
+
+    foreach ($field_values as $langcode => $items) {
+      $items = _field_filter_items($field, $items);
+      // We assume that if at least one of the fields is not empty then
+      // field collection item not empty too.
+      if (is_array($items) && count($items)) {
+        return FALSE;
+      }
+    }
+  }
+  return TRUE;
+}
+
+function field_collection_item_label() {
+  return 'Label';
+}
+
+/**
+ * Loads individual field container object.
+ *
+ */
+function field_collection_item_load($item_id = NULL, $reset = FALSE) {
+  $item_ids = (isset($item_id) ? array($item_id) : array());
+  $items = field_collection_item_load_multiple($item_ids, array(), $reset);
+  return $items ? reset($items) : FALSE;
+}
+
+/**
+ * Loads field container entities from the database.
+ *
+ * @param mixed $cids
+ *    An array of container IDs.
+ * @param mixed $conditions
+ *    An array of conditions on the {field_container} table in the form 'field' => $value.
+ * @param mixed $reset
+ *  Whether to reset the internal load cache.
+ *
+ * @return
+ *   An array of field container objects indexed by cid.
+ */
+function field_collection_item_load_multiple($item_ids = array(), $conditions = array(), $reset = FALSE) {
+  return entity_load('field_collection_item', $item_ids, $conditions, $reset);
+}
+
+function field_collection_item_save($item) {
+  field_attach_presave('field_collection_item', $item);
+
+  // Determine if we will be inserting a new item.
+  if (!isset($item->is_new)) {
+    $item->is_new = empty($item->item_id);
+  }
+
+  // Save the item.
+  if ($item->is_new) {
+    drupal_write_record('field_collection_item', $item);
+    $op = 'insert';
+  }
+  else {
+    drupal_write_record('field_collection_item', $item, 'item_id');
+    $op = 'update';
+  }
+
+  // Save fields.
+  $function = "field_attach_$op";
+  $function('field_collection_item', $item);
+
+  module_invoke_all('entity_' . $op, $item, 'field_collection_item');
+
+  // Clear internal properties.
+  unset($item->is_new);
+}
+
+function field_collection_item_set_defaults($info = array()) {
+  $item = &drupal_static(__FUNCTION__);
+
+  if (!isset($item)) {
+    $item = new stdClass();
+    $item->collection_name = '';
+  }
+
+  $new_item = clone $item;
+  $info = (array) $info;
+  foreach ($info as $key => $data) {
+    $new_item->$key = $data;
+  }
+
+  return $new_item;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function field_collection_menu() {
+  $items['admin/structure/field-collections'] = array(
+    'title' => 'Field collections',
+    'description' => 'Manage field collections, their fields, display settings etc.',
+    'page callback' => 'field_collections_overview',
+    'access arguments' => array('administer content types'),
+    'file' => 'collections.inc',
+  );
+  $items['admin/structure/field-collections/list'] = array(
+    'title' => 'List',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
+  );
+  $items['admin/structure/field-collections/add'] = array(
+    'title' => 'Add collection',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('field_collection_form'),
+    'access arguments' => array('administer content types'),
+    'type' => MENU_LOCAL_ACTION,
+    'file' => 'collections.inc',
+  );
+  $items['admin/structure/field-collections/manage/%field_collection'] = array(
+    'title' => 'Edit collection',
+    'title callback' => 'field_collection_page_title',
+    'title arguments' => array(4),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('field_collection_form', 4),
+    'access arguments' => array('administer content types'),
+    'file' => 'collections.inc',
+  );
+  $items['admin/structure/field-collections/manage/%field_collection/edit'] = array(
+    'title' => 'Edit',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+  $items['admin/structure/field-collections/manage/%field_collection/delete'] = array(
+    'title' => 'Delete',
+    'page arguments' => array('field_collection_delete_confirm', 4),
+    'access arguments' => array('administer content types'),
+    'file' => 'collections.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Returns a list of available field container types.
+ *
+ * @return
+ *   An array of field container types, keyed by the type.
+ */
+function field_collections_get_names() {
+  return _field_collections_build()->names;
+}
+
+/**
+ * Returns a list of all the available field collections.
+ *
+ * @return
+ *   An array of field collections, keyed by the name.
+ */
+function field_collections_get_list() {
+  return _field_collections_build()->list;
+}
+
+/**
+ * Menu argument loader: loads a field collection by string.
+ *
+ * @param $name
+ *   The machine-readable name of a field collection to load, where '_' is replaced
+ *   with '-'.
+ *
+ * @return
+ *   A field collection object or FALSE if $name does not exist.
+ */
+function field_collection_load($name) {
+  $name = strtr($name, array('-' => '_'));
+  $list = _field_collections_build()->list;
+  return isset($list[$name]) ? $list[$name] : FALSE;
+}
+
+/**
+ * Updates the database cache of node types.
+ */
+function field_collections_rebuild() {
+  _field_collections_build(TRUE);
+}
+
+/**
+ * Saves a field collection type to the database.
+ *
+ * @param $info
+ *   The field collection type to save, as an object.
+ *
+ * @return
+ *   Status flag indicating outcome of the operation.
+ */
+function field_collection_save($info) {
+  $is_existing = FALSE;
+  $existing_name = !empty($info->old_name) ? $info->old_name : $info->name;
+  $is_existing = (bool) db_query_range('SELECT 1 FROM {field_collection} WHERE name = :name', 0, 1, array(':name' => $existing_name))->fetchField();
+  $collection = field_collection_set_defaults($info);
+
+  $fields = array(
+    'name' => (string) $collection->name,
+    'title' => (string) $collection->title,
+    'description' => (string) $collection->description,
+  );
+
+  if ($is_existing) {
+    db_update('field_collection')
+      ->fields($fields)
+      ->condition('name', $existing_name)
+      ->execute();
+
+    if (!empty($collection->old_name) && $collection->old_name != $collection->name) {
+      field_attach_rename_bundle('field_collection', $collection->old_name, $collection->name);
+    }
+
+    $status = SAVED_UPDATED;
+  }
+  else {
+    db_insert('field_collection')
+      ->fields($fields)
+      ->execute();
+
+    field_attach_create_bundle('field_collection', $collection->name);
+
+    $status = SAVED_NEW;
+  }
+
+  // Clear collection list cache
+  drupal_static_reset('_field_collections_build');
+
+  return $status;
+}
+
+/**
+ * Set the default values for a field collection.
+ *
+ * @param $info
+ *   An object or array containing values to override the defaults.
+ *
+ * @return
+ *  A field collection object.
+ */
+function field_collection_set_defaults($info = array()) {
+  $collection = &drupal_static(__FUNCTION__);
+
+  if (!isset($collection)) {
+    $collection = new stdClass();
+    $collection->name = '';
+    $collection->title = '';
+    $collection->description = '';
+  }
+
+  $new_collection = clone $collection;
+  $info = (array) $info;
+  foreach ($info as $key => $data) {
+    $new_collection->$key = $data;
+  }
+
+  return $new_collection;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function field_collection_theme() {
+  return array(
+    'field_collection_admin_overview' => array(
+      'variables' => array('title' => NULL, 'collection' => NULL),
+    ),
+    'field_collection_table_form' => array(
+      'render element' => 'element',
+    ),
+  );
+}
+
+/**
+ * Builds and returns list of available field container types.
+ */
+function _field_collections_build($rebuild = FALSE) {
+  if (!$rebuild) {
+    $_collections = &drupal_static(__FUNCTION__);
+    if (is_object($_collections)) {
+      return $_collections;
+    }
+  }
+
+  $_collections = (object) array('list' => array(), 'names' => array());
+
+  $query = db_select('field_collection', 'fc')
+    ->fields('fc')
+    ->orderBy('fc.name', 'ASC');
+
+  foreach ($query->execute() as $object) {
+    $name = $object->name;
+    $_collections->list[$name] = $object;
+    $_collections->names[$name] = $object->title;
+  }
+
+  asort($_collections->names);
+
+  return $_collections;
+}
+
+/**
+ * Implements hook_entity_info().
+ */
+function field_collection_entity_info() {
+  $return =  array(
+    'field_collection_item' => array(
+      'label' => t('Field collection'),
+      'base table' => 'field_collection_item',
+      'uri callback' => 'field_collection_item_uri',
+      'fieldable' => TRUE,
+      'controller class' => 'FieldCollectionItemController',
+      'entity keys' => array(
+        'id' => 'item_id',
+        'bundle' => 'collection_name',
+      ),
+      'label callback' => 'field_collection_item_label',
+      'bundle keys' => array(
+        'bundle' => 'name',
+      ),
+      'bundles' => array(),
+      'view modes' => array(
+        'full' => array(
+          'label' => t('Full'),
+          'custom settings' => FALSE,
+        ),
+      ),
+      'static cache' => FALSE,
+    ),
+  );
+
+  // Bundles must provide a human readable name so we can create help and error
+  // messages, and the path to attach Field admin pages to.
+  foreach (field_collections_get_names() as $name => $title) {
+    $return['field_collection_item']['bundles'][$name] = array(
+      'label' => $title,
+      'admin' => array(
+        'path' => 'admin/structure/field-collections/manage/%field_collection',
+        'real path' => 'admin/structure/field-collections/manage/' . str_replace('_', '-', $name),
+        'bundle argument' => 4,
+        'access arguments' => array('administer content types'),
+      ),
+    );
+  }
+  return $return;
+}
